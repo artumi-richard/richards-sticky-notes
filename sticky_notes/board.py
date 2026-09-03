@@ -1,6 +1,7 @@
 import json
 import os
 import time
+from datetime import date as date_cls, datetime, timedelta
 from pathlib import Path
 
 import gi
@@ -80,12 +81,21 @@ class BoardWindow(Adw.ApplicationWindow):
         grid_button.connect("clicked", lambda _b: self.sort_grid())
         header.pack_start(grid_button)
 
-        self.closed_button = Gtk.MenuButton()
-        self.closed_button.set_icon_name("edit-undo-symbolic")
+        self.closed_button = Gtk.Button(icon_name="edit-undo-symbolic")
         self.closed_button.set_tooltip_text("Recently Closed")
-        self.closed_popover = Gtk.Popover()
-        self.closed_button.set_popover(self.closed_popover)
+        self.closed_button.connect("clicked", self._on_closed_clicked)
         header.pack_start(self.closed_button)
+
+        self.closed_window = Adw.Window()
+        self.closed_window.set_title("Recently Closed Notes")
+        self.closed_window.set_default_size(380, 520)
+        self.closed_window.set_hide_on_close(True)
+        closed_toolbar = Adw.ToolbarView()
+        closed_toolbar.add_top_bar(Adw.HeaderBar())
+        self.closed_scroller = Gtk.ScrolledWindow()
+        self.closed_scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        closed_toolbar.set_content(self.closed_scroller)
+        self.closed_window.set_content(closed_toolbar)
 
         prefs_button = Gtk.Button(icon_name="preferences-system-symbolic")
         prefs_button.set_tooltip_text("Preferences")
@@ -373,18 +383,49 @@ class BoardWindow(Adw.ApplicationWindow):
             entry for entry in self._closed_notes if entry["closed_at"] >= cutoff
         ]
 
+    @staticmethod
+    def _closed_entry_snippet(entry):
+        stripped = entry.get("text", "").strip()
+        if stripped:
+            snippet = stripped.splitlines()[0]
+        elif any(run.get("type") == "image" for run in entry.get("content") or []):
+            snippet = "Image"
+        else:
+            snippet = "(empty note)"
+        if len(snippet) > 28:
+            snippet = snippet[:28] + "…"
+        return snippet
+
+    @staticmethod
+    def _day_heading(day):
+        today = date_cls.today()
+        if day == today:
+            return "Today"
+        if day == today - timedelta(days=1):
+            return "Yesterday"
+        return day.strftime("%A, %d %B")
+
     def _refresh_closed_menu(self):
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
         for margin in ("top", "bottom", "start", "end"):
             getattr(box, f"set_margin_{margin}")(8)
-        box.set_size_request(220, -1)
+        box.set_size_request(320, -1)
 
         if not self._closed_notes:
             label = Gtk.Label(label="No recently closed notes")
             label.add_css_class("dim-label")
             box.append(label)
         else:
+            current_day = None
             for entry in reversed(self._closed_notes):
+                closed_dt = datetime.fromtimestamp(entry["closed_at"])
+                if closed_dt.date() != current_day:
+                    current_day = closed_dt.date()
+                    heading = Gtk.Label(label=self._day_heading(current_day), xalign=0)
+                    heading.add_css_class("heading")
+                    heading.set_margin_top(8)
+                    box.append(heading)
+
                 row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
 
                 swatch = Gtk.Box()
@@ -393,12 +434,13 @@ class BoardWindow(Adw.ApplicationWindow):
                 swatch.set_size_request(14, 14)
                 row.append(swatch)
 
-                snippet = entry["text"].strip().splitlines()[0] if entry["text"].strip() else "(empty note)"
-                if len(snippet) > 28:
-                    snippet = snippet[:28] + "…"
-                label = Gtk.Label(label=snippet, xalign=0)
+                label = Gtk.Label(label=self._closed_entry_snippet(entry), xalign=0)
                 label.set_hexpand(True)
                 row.append(label)
+
+                time_label = Gtk.Label(label=closed_dt.strftime("%H:%M"))
+                time_label.add_css_class("dim-label")
+                row.append(time_label)
 
                 restore_button = Gtk.Button(icon_name="edit-undo-symbolic")
                 restore_button.add_css_class("flat")
@@ -406,14 +448,29 @@ class BoardWindow(Adw.ApplicationWindow):
                 restore_button.connect("clicked", self._on_restore_clicked, entry)
                 row.append(restore_button)
 
+                delete_button = Gtk.Button(icon_name="user-trash-symbolic")
+                delete_button.add_css_class("flat")
+                delete_button.set_tooltip_text("Delete Permanently")
+                delete_button.connect("clicked", self._on_delete_closed_clicked, entry)
+                row.append(delete_button)
+
                 box.append(row)
 
-        self.closed_popover.set_child(box)
+        self.closed_scroller.set_child(box)
         self.closed_button.set_sensitive(True)
 
+    def _on_closed_clicked(self, _button):
+        self.closed_window.set_transient_for(self)
+        self.closed_window.present()
+
     def _on_restore_clicked(self, _button, entry):
-        self.closed_popover.popdown()
         self.restore_note(entry)
+
+    def _on_delete_closed_clicked(self, _button, entry):
+        if entry in self._closed_notes:
+            self._closed_notes.remove(entry)
+        self._refresh_closed_menu()
+        self.request_save()
 
     def confirm_set_default_size(self, note):
         w, h = self._sizes.get(note, (0, 0))
