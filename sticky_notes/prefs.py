@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 
 from gi.repository import GLib
@@ -79,4 +80,6 @@ class Preferences:
 
     def save(self):
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-        CONFIG_FILE.write_text(json.dumps(self.to_dict(), indent=2))
+        tmp_file = CONFIG_FILE.with_suffix(".json.tmp")
+        tmp_file.write_text(json.dumps(self.to_dict(), indent=2))
+        os.replace(tmp_file, CONFIG_FILE)

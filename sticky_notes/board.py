@@ -1,4 +1,5 @@
 import json
+import os
 import time
 from pathlib import Path
 
@@ -662,9 +663,10 @@ class BoardWindow(Adw.ApplicationWindow):
         ]
 
         STATE_DIR.mkdir(parents=True, exist_ok=True)
-        STATE_FILE.write_text(
-            json.dumps({"notes": notes_data, "closed_notes": closed_data}, indent=2)
-        )
+        payload = json.dumps({"notes": notes_data, "closed_notes": closed_data}, indent=2)
+        tmp_file = STATE_FILE.with_suffix(".json.tmp")
+        tmp_file.write_text(payload)
+        os.replace(tmp_file, STATE_FILE)
 
     def load_state(self):
         """Load saved notes/closed-notes. Returns True if a state file existed."""
