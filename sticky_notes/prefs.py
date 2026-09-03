@@ -35,6 +35,8 @@ class Preferences:
         self.default_font_style = FONT_STYLE_PROPORTIONAL
         self.fullscreen_mode = FULLSCREEN_MODE_WINDOW
         self.on_close_action = ON_CLOSE_NONE
+        self.grid_spacing = 20
+        self.grid_margin = 5
         self._cycle_index = 0
         self.load()
 
@@ -60,6 +62,8 @@ class Preferences:
             "default_font_style": self.default_font_style,
             "fullscreen_mode": self.fullscreen_mode,
             "on_close_action": self.on_close_action,
+            "grid_spacing": self.grid_spacing,
+            "grid_margin": self.grid_margin,
         }
 
     def load(self):
@@ -77,6 +81,8 @@ class Preferences:
         self.default_font_style = data.get("default_font_style", self.default_font_style)
         self.fullscreen_mode = data.get("fullscreen_mode", self.fullscreen_mode)
         self.on_close_action = data.get("on_close_action", self.on_close_action)
+        self.grid_spacing = data.get("grid_spacing", self.grid_spacing)
+        self.grid_margin = data.get("grid_margin", self.grid_margin)
 
     def save(self):
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)

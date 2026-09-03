@@ -32,7 +32,7 @@ ON_CLOSE_LABELS = ["Do Nothing", "Re-arrange Remaining Notes in a Grid"]
 ON_CLOSE_VALUES = [ON_CLOSE_NONE, ON_CLOSE_REFLOW_GRID]
 
 
-def build_preferences_window(prefs, app):
+def build_preferences_window(prefs, app, board):
     window = Adw.PreferencesWindow()
     window.set_title("Sticky Notes Preferences")
     window.set_default_size(560, 520)
@@ -105,9 +105,11 @@ def build_preferences_window(prefs, app):
         subtitle="Dragging or resizing stops short of covering another note",
         active=prefs.prevent_overlap,
     )
-    overlap_row.connect(
-        "notify::active", lambda row, _p: set_and_save("prevent_overlap", row.get_active())
-    )
+    def on_overlap_toggled(row, _p):
+        set_and_save("prevent_overlap", row.get_active())
+        board.set_cascade_enabled(not row.get_active())
+
+    overlap_row.connect("notify::active", on_overlap_toggled)
     layout_group.add(overlap_row)
 
     fullscreen_row = Adw.ComboRow(title="Note Fullscreen")
@@ -129,6 +131,39 @@ def build_preferences_window(prefs, app):
         lambda row, _p: set_and_save("on_close_action", ON_CLOSE_VALUES[row.get_selected()]),
     )
     layout_group.add(on_close_row)
+
+    spacing_row = Adw.SpinRow(
+        title="Grid Spacing",
+        subtitle="Used for note placement margins, cascading, arranging, and drag-snapping",
+        adjustment=Gtk.Adjustment(
+            value=prefs.grid_spacing,
+            lower=1,
+            upper=200,
+            step_increment=5,
+            page_increment=20,
+        ),
+    )
+    spacing_row.connect(
+        "notify::value", lambda row, _p: set_and_save("grid_spacing", int(row.get_value()))
+    )
+    layout_group.add(spacing_row)
+
+    margin_row = Adw.SpinRow(
+        title="Grid Margin",
+        subtitle="Gap kept inside each grid line — e.g. spacing 20 + margin 5 "
+        "gives a 90px note spanning 5 grid cells (5×20 − 5 − 5)",
+        adjustment=Gtk.Adjustment(
+            value=prefs.grid_margin,
+            lower=0,
+            upper=100,
+            step_increment=1,
+            page_increment=5,
+        ),
+    )
+    margin_row.connect(
+        "notify::value", lambda row, _p: set_and_save("grid_margin", int(row.get_value()))
+    )
+    layout_group.add(margin_row)
 
     font_group = Adw.PreferencesGroup()
     font_group.set_title("Fonts")

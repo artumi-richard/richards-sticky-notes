@@ -1,3 +1,4 @@
+import base64
 import os
 import re
 
@@ -403,14 +404,70 @@ class NoteWidget(Gtk.Overlay):
         if texture is None:
             return
 
+        buf = self.text_view.get_buffer()
+        it = buf.get_iter_at_mark(buf.get_insert())
+        image_bytes = bytes(texture.save_to_png_bytes().get_data())
+        self._insert_image_at_iter(it, texture, image_bytes)
+        self.board.request_save()
+
+    def _insert_image_at_iter(self, it, texture, image_bytes):
         picture = Gtk.Picture.new_for_paintable(texture)
         picture.set_can_shrink(True)
         picture.set_content_fit(Gtk.ContentFit.CONTAIN)
-        max_width = max(self.get_width() - 24, 80)
+        req_w, _req_h = self.get_size_request()
+        available_w = req_w if req_w > 0 else (self.get_width() or 300)
+        max_width = max(available_w - 24, 80)
         aspect = texture.get_intrinsic_height() / max(texture.get_intrinsic_width(), 1)
         picture.set_size_request(max_width, int(max_width * aspect))
 
         buf = self.text_view.get_buffer()
-        it = buf.get_iter_at_mark(buf.get_insert())
         anchor = buf.create_child_anchor(it)
+        anchor.image_bytes = image_bytes
         self.text_view.add_child_at_anchor(picture, anchor)
+
+    def get_content_runs(self):
+        """Serialize text + embedded images, in order, for persistence."""
+        buf = self.text_view.get_buffer()
+        runs = []
+        it = buf.get_start_iter()
+        chunk_start = it.copy()
+        while True:
+            anchor = it.get_child_anchor()
+            if anchor is not None:
+                if not it.equal(chunk_start):
+                    runs.append({"type": "text", "value": buf.get_text(chunk_start, it, False)})
+                image_bytes = getattr(anchor, "image_bytes", None)
+                if image_bytes:
+                    runs.append(
+                        {"type": "image", "data": base64.b64encode(image_bytes).decode("ascii")}
+                    )
+                if not it.forward_char():
+                    break
+                chunk_start = it.copy()
+                continue
+            if not it.forward_char():
+                break
+
+        end = buf.get_end_iter()
+        if not chunk_start.equal(end):
+            runs.append({"type": "text", "value": buf.get_text(chunk_start, end, False)})
+        return runs
+
+    def set_content_runs(self, runs):
+        """Rebuild text + embedded images from get_content_runs() output."""
+        buf = self.text_view.get_buffer()
+        self._restoring = True
+        buf.set_text("")
+        for run in runs:
+            if run.get("type") == "text":
+                buf.insert(buf.get_end_iter(), run.get("value", ""))
+            elif run.get("type") == "image":
+                try:
+                    image_bytes = base64.b64decode(run["data"])
+                    texture = Gdk.Texture.new_from_bytes(GLib.Bytes.new(image_bytes))
+                except (GLib.Error, ValueError, KeyError):
+                    continue
+                self._insert_image_at_iter(buf.get_end_iter(), texture, image_bytes)
+        self._restoring = False
+        self._last_committed_text = self.get_text()
+        self._relink()

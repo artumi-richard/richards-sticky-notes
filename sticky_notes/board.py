@@ -18,9 +18,7 @@ from .prefs import (
 )
 from .prefs_ui import build_preferences_window
 
-CASCADE_STEP = 32
 CLOSED_RETENTION_SECONDS = 60 * 24 * 60 * 60  # 60 days
-FREE_SPACE_GAP = 16
 FREE_SPACE_MAX_ROWS = 200
 SAVE_DEBOUNCE_MS = 800
 
@@ -72,10 +70,10 @@ class BoardWindow(Adw.ApplicationWindow):
         add_button.connect("clicked", lambda _b: self.add_note())
         header.pack_start(add_button)
 
-        cascade_button = Gtk.Button(icon_name="view-continuous-symbolic")
-        cascade_button.set_tooltip_text("Arrange in Cascade")
-        cascade_button.connect("clicked", lambda _b: self.sort_cascade())
-        header.pack_start(cascade_button)
+        self.cascade_button = Gtk.Button(icon_name="view-continuous-symbolic")
+        self.cascade_button.connect("clicked", lambda _b: self.sort_cascade())
+        header.pack_start(self.cascade_button)
+        self.set_cascade_enabled(not prefs.prevent_overlap)
 
         grid_button = Gtk.Button(icon_name="view-grid-symbolic")
         grid_button.set_tooltip_text("Arrange in Grid")
@@ -115,6 +113,7 @@ class BoardWindow(Adw.ApplicationWindow):
 
         self.scroller = Gtk.ScrolledWindow()
         self.scroller.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+        self.scroller.set_overlay_scrolling(False)
         self.scroller.set_child(self.fixed)
 
         toolbar_view.set_content(self.scroller)
@@ -162,6 +161,7 @@ class BoardWindow(Adw.ApplicationWindow):
             {
                 "color": note.color_name,
                 "text": note.get_text(),
+                "content": note.get_content_runs(),
                 "position": (x, y),
                 "size": (w, h),
                 "font_style": note.font_style,
@@ -187,13 +187,15 @@ class BoardWindow(Adw.ApplicationWindow):
         w, h = size
         if self._would_overlap(None, x, y, w, h):
             x, y = self._find_free_space(size)
-        self.add_note(
+        note = self.add_note(
             color_name=entry["color"],
             text=entry["text"],
             position=(x, y),
             size=size,
             font_style=entry.get("font_style"),
         )
+        if entry.get("content"):
+            note.set_content_runs(entry["content"])
         self._refresh_closed_menu()
         self.request_save()
 
@@ -203,15 +205,33 @@ class BoardWindow(Adw.ApplicationWindow):
     def get_note_size(self, note):
         return self._sizes.get(note, (MIN_NOTE_WIDTH, MIN_NOTE_HEIGHT))
 
+    def _snap_position(self, value):
+        spacing = self.prefs.grid_spacing
+        if spacing <= 0:
+            return value
+        margin = self.prefs.grid_margin
+        cell = round((value - margin) / spacing)
+        return cell * spacing + margin
+
+    def _snap_size(self, value, minimum):
+        spacing = self.prefs.grid_spacing
+        if spacing <= 0:
+            return max(value, minimum)
+        margin = self.prefs.grid_margin
+        cells = max(1, round((value + 2 * margin) / spacing))
+        return max(minimum, cells * spacing - 2 * margin)
+
     def move_note(self, note, x, y):
-        x = max(0.0, x)
-        y = max(0.0, y)
+        x = max(0.0, self._snap_position(x))
+        y = max(0.0, self._snap_position(y))
         self.fixed.move(note, x, y)
         self._positions[note] = (x, y)
         self._recompute_canvas_size()
         self.request_save()
 
     def resize_note(self, note, w, h):
+        w = self._snap_size(w, MIN_NOTE_WIDTH)
+        h = self._snap_size(h, MIN_NOTE_HEIGHT)
         note.set_size_request(w, h)
         self._sizes[note] = (w, h)
         self._recompute_canvas_size()
@@ -224,8 +244,9 @@ class BoardWindow(Adw.ApplicationWindow):
             w, h = self._sizes.get(note, (0, 0))
             max_x = max(max_x, x + w)
             max_y = max(max_y, y + h)
-        new_w = int(max_x + FREE_SPACE_GAP) if self._positions else 0
-        new_h = int(max_y + FREE_SPACE_GAP) if self._positions else 0
+        margin = self.prefs.grid_margin
+        new_w = int(max_x + margin) if self._positions else 0
+        new_h = int(max_y + margin) if self._positions else 0
         self.fixed.set_size_request(new_w, new_h)
 
     def raise_note(self, note):
@@ -233,9 +254,34 @@ class BoardWindow(Adw.ApplicationWindow):
         # in-progress click/gesture routing to the note's children survive.
         note.insert_before(self.fixed, None)
 
+    def _reading_order(self):
+        """Notes top-to-bottom, left-to-right by current on-screen position
+        (like window-manager icon layout), not creation order."""
+        items = [
+            (note, x, y, self._sizes.get(note, (0, 0))[1])
+            for note, (x, y) in self._positions.items()
+        ]
+        items.sort(key=lambda item: item[2])  # by y
+
+        rows = []
+        for note, x, y, h in items:
+            for row in rows:
+                if abs(y - row["y"]) <= row["h"] / 2:
+                    row["items"].append((note, x))
+                    row["y"] = min(row["y"], y)
+                    row["h"] = max(row["h"], h)
+                    break
+            else:
+                rows.append({"y": y, "h": h, "items": [(note, x)]})
+
+        ordered = []
+        for row in rows:
+            ordered.extend(note for note, _x in sorted(row["items"], key=lambda t: t[1]))
+        return ordered
+
     def sort_cascade(self):
         self._next_cascade = 0
-        for note in list(self._positions.keys()):
+        for note in self._reading_order():
             x, y = self._next_position()
             self.fixed.move(note, x, y)
             self._positions[note] = (x, y)
@@ -243,20 +289,21 @@ class BoardWindow(Adw.ApplicationWindow):
         self.request_save()
 
     def sort_grid(self):
+        margin = self.prefs.grid_margin
         viewport_w = self.scroller.get_width() or self.fixed.get_width() or 900
-        x = FREE_SPACE_GAP
-        y = FREE_SPACE_GAP
+        x = margin
+        y = margin
         row_height = 0
-        for note in list(self._positions.keys()):
+        for note in self._reading_order():
             w, h = self._sizes.get(note, self.prefs.default_size())
-            if x > FREE_SPACE_GAP and x + w > viewport_w:
-                x = FREE_SPACE_GAP
-                y += row_height + FREE_SPACE_GAP
+            if x > margin and x + w > viewport_w:
+                x = margin
+                y += row_height + margin
                 row_height = 0
             self.fixed.move(note, x, y)
             self._positions[note] = (x, y)
             row_height = max(row_height, h)
-            x += w + FREE_SPACE_GAP
+            x += w + margin
         self._recompute_canvas_size()
         self.request_save()
 
@@ -276,30 +323,41 @@ class BoardWindow(Adw.ApplicationWindow):
         return self._next_position()
 
     def _next_position(self):
-        offset = self._next_cascade * CASCADE_STEP
+        margin = self.prefs.grid_margin
+        offset = self._next_cascade * self.prefs.grid_spacing
         self._next_cascade = (self._next_cascade + 1) % 10
-        return 24 + offset, 24 + offset
+        return margin + offset, margin + offset
 
     def _find_free_space(self, size):
         width, height = size
-        cell_w = width + FREE_SPACE_GAP
-        cell_h = height + FREE_SPACE_GAP
+        margin = self.prefs.grid_margin
+        step = max(1, self.prefs.grid_spacing)
 
         viewport_w = self.scroller.get_width() or self.fixed.get_width() or 900
-        cols = max(1, int(viewport_w // cell_w))
+        max_x = max(margin, int(viewport_w - width))
+        max_y = margin + FREE_SPACE_MAX_ROWS * step
 
         occupied = [
             (px, py, px + self._sizes.get(note, (0, 0))[0], py + self._sizes.get(note, (0, 0))[1])
             for note, (px, py) in self._positions.items()
         ]
 
-        for row in range(FREE_SPACE_MAX_ROWS):
-            for col in range(cols):
-                x = FREE_SPACE_GAP + col * cell_w
-                y = FREE_SPACE_GAP + row * cell_h
-                candidate = (x, y, x + width, y + height)
-                if not any(self._rects_overlap(candidate, rect) for rect in occupied):
+        # Fine-grained scan (not a grid sized to this note) so a new note
+        # hugs however tall the existing rows actually are, rather than
+        # guessing a uniform row height and leaving too large a gap.
+        y = margin
+        while y <= max_y:
+            x = margin
+            while x <= max_x:
+                # Pad the check by margin so the found spot keeps at least
+                # a margin's gap from neighbors, not just zero overlap
+                # (rect overlap is a strict inequality, so touching edges
+                # would otherwise count as "free").
+                padded = (x - margin, y - margin, x + width + margin, y + height + margin)
+                if not any(self._rects_overlap(padded, rect) for rect in occupied):
                     return (x, y)
+                x += step
+            y += step
 
         return self._next_position()
 
@@ -379,8 +437,17 @@ class BoardWindow(Adw.ApplicationWindow):
             self.prefs.default_height = h
             self.prefs.save()
 
+    def set_cascade_enabled(self, enabled):
+        self.cascade_button.set_sensitive(enabled)
+        self.cascade_button.set_tooltip_text(
+            "Arrange in Cascade"
+            if enabled
+            else "Cascade overlaps notes by design — disabled while "
+            "“Prevent Notes Overlapping” is on"
+        )
+
     def _on_prefs_clicked(self, _button):
-        window = build_preferences_window(self.prefs, self.get_application())
+        window = build_preferences_window(self.prefs, self.get_application(), self)
         window.set_transient_for(self)
         window.present()
 
@@ -588,26 +655,25 @@ class BoardWindow(Adw.ApplicationWindow):
         if note is not None and mode in ("move", "resize") and self.prefs.prevent_overlap:
             self._snap_out_of_overlap(note)
 
-    def _snap_out_of_overlap(self, note, max_radius=30):
+    def _snap_out_of_overlap(self, note, max_radius=300):
         w, h = self._sizes.get(note, (0, 0))
         x, y = self._positions.get(note, (0, 0))
         if not self._would_overlap(note, x, y, w, h):
             return
 
-        cell_w = w + FREE_SPACE_GAP
-        cell_h = h + FREE_SPACE_GAP
-        col = round((x - FREE_SPACE_GAP) / cell_w)
-        row = round((y - FREE_SPACE_GAP) / cell_h)
+        # Search outward in grid-spacing steps (not steps sized to this note)
+        # so the snap lands in the closest actual gap, not a note-sized jump.
+        step = max(1, self.prefs.grid_spacing)
+        col = round(x / step)
+        row = round(y / step)
 
         for radius in range(max_radius + 1):
             for dc in range(-radius, radius + 1):
                 for dr in range(-radius, radius + 1):
                     if max(abs(dc), abs(dr)) != radius:
                         continue
-                    c = max(0, col + dc)
-                    r = max(0, row + dr)
-                    cx = FREE_SPACE_GAP + c * cell_w
-                    cy = FREE_SPACE_GAP + r * cell_h
+                    cx = max(0, (col + dc) * step)
+                    cy = max(0, (row + dr) * step)
                     if not self._would_overlap(note, cx, cy, w, h):
                         self.move_note(note, cx, cy)
                         return
@@ -638,6 +704,7 @@ class BoardWindow(Adw.ApplicationWindow):
             notes_data.append(
                 {
                     "text": note.get_text(),
+                    "content": note.get_content_runs(),
                     "color": note.color_name,
                     "font_style": note.font_style,
                     "x": x,
@@ -650,6 +717,7 @@ class BoardWindow(Adw.ApplicationWindow):
         closed_data = [
             {
                 "text": entry["text"],
+                "content": entry.get("content"),
                 "color": entry["color"],
                 "font_style": entry.get("font_style"),
                 "x": entry["position"][0],
@@ -675,7 +743,7 @@ class BoardWindow(Adw.ApplicationWindow):
             return False
 
         for entry in data.get("notes", []):
-            self.add_note(
+            note = self.add_note(
                 color_name=entry.get("color", "yellow"),
                 text=entry.get("text", ""),
                 position=(entry.get("x", 24), entry.get("y", 24)),
@@ -685,12 +753,15 @@ class BoardWindow(Adw.ApplicationWindow):
                 ),
                 font_style=entry.get("font_style"),
             )
+            if entry.get("content"):
+                note.set_content_runs(entry["content"])
 
         for entry in data.get("closed_notes", []):
             self._closed_notes.append(
                 {
                     "color": entry.get("color", "yellow"),
                     "text": entry.get("text", ""),
+                    "content": entry.get("content"),
                     "position": (entry.get("x", 0), entry.get("y", 0)),
                     "size": (entry.get("w", 0), entry.get("h", 0)),
                     "font_style": entry.get("font_style"),
