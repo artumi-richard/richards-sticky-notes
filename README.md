@@ -33,6 +33,10 @@ Wayland window-positioning headaches.
 
 ![Preferences window](screenshots/preferences.png)
 
+A note fullscreened to fill the whole screen (`F11`):
+
+![Fullscreen note](screenshots/fullscreen.png)
+
 ## Keyboard shortcuts
 
 | Shortcut | Action |
@@ -42,6 +46,8 @@ Wayland window-positioning headaches.
 | `Ctrl+Page Down` / `Ctrl+Page Up` | Move focus to the next / previous note |
 | `F11` | Toggle fullscreen for the focused note |
 | `Ctrl+?` | Show keyboard shortcuts |
+
+![Keyboard shortcuts window](screenshots/shortcuts.png)
 
 ## Requirements
 
