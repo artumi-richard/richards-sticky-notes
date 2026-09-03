@@ -54,6 +54,12 @@ A note fullscreened to fill the whole screen (`F11`):
 - GNOME / GTK 4 (tested on GTK 4.14, libadwaita 1.5, GNOME Shell 46)
 - Python 3 with PyGObject (`python3-gi`, `gir1.2-gtk-4.0`, `gir1.2-adw-1`)
 
+On Ubuntu:
+
+```sh
+sudo apt install python3-gi gir1.2-gtk-4.0 gir1.2-adw-1
+```
+
 ## Running
 
 ```sh
