@@ -10,7 +10,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gio, GLib, Gtk
 
-from .note import MIN_NOTE_HEIGHT, MIN_NOTE_WIDTH, NoteWidget
+from .note import MIN_NOTE_HEIGHT, MIN_NOTE_WIDTH, NOTE_HEIGHT, NoteWidget
 from .prefs import (
     FULLSCREEN_MODE_SCREEN,
     ON_CLOSE_REFLOW_GRID,
@@ -47,8 +47,11 @@ class BoardWindow(Adw.ApplicationWindow):
         self._focused_note = None
         self._fullscreen_note = None
         self._fullscreen_saved = None
+        self._pending_scroll = None
+        self._initial_focus_note = None
 
         self.connect("close-request", self._on_close_request)
+        self._map_handler_id = self.connect("map", self._on_first_map)
 
         self._used_os_fullscreen = False
 
@@ -171,6 +174,7 @@ class BoardWindow(Adw.ApplicationWindow):
                 "color": note.color_name,
                 "text": note.get_text(),
                 "content": note.get_content_runs(),
+                "cursor": note.get_cursor_offset(),
                 "position": (x, y),
                 "size": (w, h),
                 "font_style": note.font_style,
@@ -205,6 +209,7 @@ class BoardWindow(Adw.ApplicationWindow):
         )
         if entry.get("content"):
             note.set_content_runs(entry["content"])
+        note.set_cursor_offset(entry.get("cursor", 0))
         self._refresh_closed_menu()
         self.request_save()
 
@@ -513,6 +518,33 @@ class BoardWindow(Adw.ApplicationWindow):
         action.connect("activate", lambda action, param: callback())
         self.add_action(action)
 
+    def _on_first_map(self, *_args):
+        self.disconnect(self._map_handler_id)
+        if self._initial_focus_note is not None:
+            self.raise_note(self._initial_focus_note)
+            self._initial_focus_note.text_view.grab_focus()
+        if self._pending_scroll is not None:
+            # Defer a tick: right at "map" the scrolled window's adjustment
+            # bounds haven't necessarily settled from their final size
+            # negotiation yet, so setting the value here can get clamped.
+            GLib.idle_add(self._apply_pending_scroll)
+        return False
+
+    def _apply_pending_scroll(self):
+        if self._pending_scroll is not None:
+            x, y = self._pending_scroll
+            self.scroller.get_hadjustment().set_value(x)
+            self.scroller.get_vadjustment().set_value(y)
+            self._pending_scroll = None
+        return False
+
+    def focus_initial_note(self):
+        """Pick the top-left-most note to receive focus once the window maps,
+        if load_state() didn't already record one from saved state."""
+        if self._initial_focus_note is None:
+            order = self._reading_order()
+            self._initial_focus_note = order[0] if order else None
+
     def set_focused_note(self, note):
         self._focused_note = note
 
@@ -520,8 +552,24 @@ class BoardWindow(Adw.ApplicationWindow):
         if self._focused_note is not None:
             self.close_note(self._focused_note)
 
+    def _reading_order(self):
+        """Notes ordered left-to-right, top-to-bottom, grouping into rows."""
+        by_y = sorted(self._positions.items(), key=lambda item: item[1][1])
+        rows = []
+        row_threshold = NOTE_HEIGHT / 2
+        for note, (x, y) in by_y:
+            if rows and y - rows[-1][0] <= row_threshold:
+                rows[-1][1].append((note, x))
+            else:
+                rows.append((y, [(note, x)]))
+        order = []
+        for _row_y, entries in rows:
+            entries.sort(key=lambda entry: entry[1])
+            order.extend(note for note, _x in entries)
+        return order
+
     def focus_relative_note(self, direction):
-        order = list(self._positions.keys())
+        order = self._reading_order()
         if not order:
             return
         if self._focused_note in order:
@@ -756,12 +804,14 @@ class BoardWindow(Adw.ApplicationWindow):
 
     def _write_state(self):
         notes_data = []
-        for note, (x, y) in self._positions.items():
+        focused_index = None
+        for i, (note, (x, y)) in enumerate(self._positions.items()):
             w, h = self._sizes.get(note, self.prefs.default_size())
             notes_data.append(
                 {
                     "text": note.get_text(),
                     "content": note.get_content_runs(),
+                    "cursor": note.get_cursor_offset(),
                     "color": note.color_name,
                     "font_style": note.font_style,
                     "x": x,
@@ -770,11 +820,14 @@ class BoardWindow(Adw.ApplicationWindow):
                     "h": h,
                 }
             )
+            if note is self._focused_note:
+                focused_index = i
 
         closed_data = [
             {
                 "text": entry["text"],
                 "content": entry.get("content"),
+                "cursor": entry.get("cursor", 0),
                 "color": entry["color"],
                 "font_style": entry.get("font_style"),
                 "x": entry["position"][0],
@@ -787,7 +840,16 @@ class BoardWindow(Adw.ApplicationWindow):
         ]
 
         STATE_DIR.mkdir(parents=True, exist_ok=True)
-        payload = json.dumps({"notes": notes_data, "closed_notes": closed_data}, indent=2)
+        payload = json.dumps(
+            {
+                "notes": notes_data,
+                "closed_notes": closed_data,
+                "focused_index": focused_index,
+                "scroll_x": self.scroller.get_hadjustment().get_value(),
+                "scroll_y": self.scroller.get_vadjustment().get_value(),
+            },
+            indent=2,
+        )
         tmp_file = STATE_FILE.with_suffix(".json.tmp")
         tmp_file.write_text(payload)
         os.replace(tmp_file, STATE_FILE)
@@ -799,6 +861,7 @@ class BoardWindow(Adw.ApplicationWindow):
         except (FileNotFoundError, json.JSONDecodeError, OSError):
             return False
 
+        loaded_notes = []
         for entry in data.get("notes", []):
             note = self.add_note(
                 color_name=entry.get("color", "yellow"),
@@ -812,6 +875,8 @@ class BoardWindow(Adw.ApplicationWindow):
             )
             if entry.get("content"):
                 note.set_content_runs(entry["content"])
+            note.set_cursor_offset(entry.get("cursor", 0))
+            loaded_notes.append(note)
 
         for entry in data.get("closed_notes", []):
             self._closed_notes.append(
@@ -819,6 +884,7 @@ class BoardWindow(Adw.ApplicationWindow):
                     "color": entry.get("color", "yellow"),
                     "text": entry.get("text", ""),
                     "content": entry.get("content"),
+                    "cursor": entry.get("cursor", 0),
                     "position": (entry.get("x", 0), entry.get("y", 0)),
                     "size": (entry.get("w", 0), entry.get("h", 0)),
                     "font_style": entry.get("font_style"),
@@ -827,4 +893,13 @@ class BoardWindow(Adw.ApplicationWindow):
             )
         self._purge_expired_closed()
         self._refresh_closed_menu()
+
+        self._pending_scroll = (data.get("scroll_x", 0), data.get("scroll_y", 0))
+        focused_index = data.get("focused_index")
+        if focused_index is not None and 0 <= focused_index < len(loaded_notes):
+            self._initial_focus_note = loaded_notes[focused_index]
+        else:
+            order = self._reading_order()
+            self._initial_focus_note = order[0] if order else None
+
         return True

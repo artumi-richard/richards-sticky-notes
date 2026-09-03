@@ -381,6 +381,16 @@ class NoteWidget(Gtk.Overlay):
         buf = self.text_view.get_buffer()
         return buf.get_text(buf.get_start_iter(), buf.get_end_iter(), False)
 
+    def get_cursor_offset(self):
+        buf = self.text_view.get_buffer()
+        return buf.get_iter_at_mark(buf.get_insert()).get_offset()
+
+    def set_cursor_offset(self, offset):
+        buf = self.text_view.get_buffer()
+        end_offset = buf.get_end_iter().get_offset()
+        offset = max(0, min(offset, end_offset))
+        buf.place_cursor(buf.get_iter_at_offset(offset))
+
     def _on_key_pressed(self, _controller, keyval, _keycode, state):
         is_paste = keyval in (Gdk.KEY_v, Gdk.KEY_V) and (
             state & Gdk.ModifierType.CONTROL_MASK

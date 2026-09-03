@@ -112,6 +112,7 @@ class StickyNotesApplication(Adw.Application):
             self.board = BoardWindow(application=self, prefs=self.prefs)
             if not self.board.load_state():
                 self.board.add_note()
+            self.board.focus_initial_note()
         self.board.present()
 
 
