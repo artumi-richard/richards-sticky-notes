@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Sticky Notes
+Comment=Digital post-it notes for your desktop
+Exec=/home/richard/dev/gnome/sticky/bin/sticky-notes
+Icon=net.rfletcher.StickyNotes
+Terminal=false
+Categories=Utility;GTK;
+StartupNotify=true
+StartupWMClass=net.rfletcher.StickyNotes
