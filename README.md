@@ -7,6 +7,28 @@ Wayland window-positioning headaches.
 
 ![Sticky Notes board](screenshots/board.png)
 
+## The board is bigger than the window
+
+The notes don't live in screen coordinates — they live at a fixed position
+on an internal canvas that only the app manages. The window is just a
+viewport onto that canvas, with scrollbars appearing whenever the canvas
+is bigger than the window.
+
+This means you can deliberately use the app like a pinboard bigger than
+your screen: enlarge the window (or go fullscreen), spread notes out
+further than would fit on a normal window, then shrink the window back
+down and scroll around to find them — their positions never change just
+because the window resized. The canvas itself auto-sizes to exactly fit
+however far out your furthest note is (plus a small margin), so the
+window can always be shrunk right down to that size with no scrollbar,
+and only shows one once you go smaller than that.
+
+This is also what solves the "remember note positions across screens"
+requirement that kicked this project off — since positions are relative
+to the app's own canvas rather than to screen/monitor resolution, a note
+stays exactly where you left it whether you're on a laptop screen, an
+external monitor, or you've resized the window entirely.
+
 ## Features
 
 - **Draggable, resizable notes** on a gradient board, with click-to-raise

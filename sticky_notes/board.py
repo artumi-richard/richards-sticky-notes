@@ -144,7 +144,7 @@ class BoardWindow(Adw.ApplicationWindow):
         self.fixed.put(note, x, y)
         self._positions[note] = (x, y)
         self._sizes[note] = (width, height)
-        self._grow_canvas_to_fit(x, y, width, height)
+        self._recompute_canvas_size()
         self.request_save()
         return note
 
@@ -173,6 +173,7 @@ class BoardWindow(Adw.ApplicationWindow):
         self.fixed.remove(note)
         self._positions.pop(note, None)
         self._sizes.pop(note, None)
+        self._recompute_canvas_size()
         self._purge_expired_closed()
         self._refresh_closed_menu()
         if self.prefs.on_close_action == ON_CLOSE_REFLOW_GRID:
@@ -207,26 +208,25 @@ class BoardWindow(Adw.ApplicationWindow):
         y = max(0.0, y)
         self.fixed.move(note, x, y)
         self._positions[note] = (x, y)
-        w, h = self._sizes.get(note, (0, 0))
-        self._grow_canvas_to_fit(x, y, w, h)
+        self._recompute_canvas_size()
         self.request_save()
 
     def resize_note(self, note, w, h):
         note.set_size_request(w, h)
         self._sizes[note] = (w, h)
-        x, y = self._positions.get(note, (0, 0))
-        self._grow_canvas_to_fit(x, y, w, h)
+        self._recompute_canvas_size()
         self.request_save()
 
-    def _grow_canvas_to_fit(self, x, y, w, h):
-        needed_w = x + w + FREE_SPACE_GAP
-        needed_h = y + h + FREE_SPACE_GAP
-        current_w = self.fixed.get_width() or self.fixed.get_size_request()[0]
-        current_h = self.fixed.get_height() or self.fixed.get_size_request()[1]
-        new_w = max(current_w, needed_w)
-        new_h = max(current_h, needed_h)
-        if new_w != current_w or new_h != current_h:
-            self.fixed.set_size_request(int(new_w), int(new_h))
+    def _recompute_canvas_size(self):
+        max_x = 0
+        max_y = 0
+        for note, (x, y) in self._positions.items():
+            w, h = self._sizes.get(note, (0, 0))
+            max_x = max(max_x, x + w)
+            max_y = max(max_y, y + h)
+        new_w = int(max_x + FREE_SPACE_GAP) if self._positions else 0
+        new_h = int(max_y + FREE_SPACE_GAP) if self._positions else 0
+        self.fixed.set_size_request(new_w, new_h)
 
     def raise_note(self, note):
         # Reorder within the same parent (no unparent/reparent) so focus and
@@ -239,8 +239,7 @@ class BoardWindow(Adw.ApplicationWindow):
             x, y = self._next_position()
             self.fixed.move(note, x, y)
             self._positions[note] = (x, y)
-            w, h = self._sizes.get(note, (0, 0))
-            self._grow_canvas_to_fit(x, y, w, h)
+        self._recompute_canvas_size()
         self.request_save()
 
     def sort_grid(self):
@@ -258,7 +257,7 @@ class BoardWindow(Adw.ApplicationWindow):
             self._positions[note] = (x, y)
             row_height = max(row_height, h)
             x += w + FREE_SPACE_GAP
-            self._grow_canvas_to_fit(x, y, 0, row_height)
+        self._recompute_canvas_size()
         self.request_save()
 
     def _would_overlap(self, note, x, y, w, h):
