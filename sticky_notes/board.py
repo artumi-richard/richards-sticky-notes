@@ -20,7 +20,6 @@ from .prefs import (
 from .prefs_ui import build_preferences_window
 
 CLOSED_RETENTION_SECONDS = 60 * 24 * 60 * 60  # 60 days
-FREE_SPACE_MAX_ROWS = 200
 SAVE_DEBOUNCE_MS = 800
 
 STATE_DIR = Path(GLib.get_user_data_dir()) / "sticky-notes"
@@ -341,24 +340,27 @@ class BoardWindow(Adw.ApplicationWindow):
     def _find_free_space(self, size):
         width, height = size
         margin = self.prefs.grid_margin
-        step = max(1, self.prefs.grid_spacing)
 
         viewport_w = self.scroller.get_width() or self.fixed.get_width() or 900
         max_x = max(margin, int(viewport_w - width))
-        max_y = margin + FREE_SPACE_MAX_ROWS * step
 
         occupied = [
             (px, py, px + self._sizes.get(note, (0, 0))[0], py + self._sizes.get(note, (0, 0))[1])
             for note, (px, py) in self._positions.items()
         ]
 
-        # Fine-grained scan (not a grid sized to this note) so a new note
-        # hugs however tall the existing rows actually are, rather than
-        # guessing a uniform row height and leaving too large a gap.
-        y = margin
-        while y <= max_y:
-            x = margin
-            while x <= max_x:
+        # Candidate positions are derived from the actual edges of existing
+        # notes (not a fixed-size grid raster), so a new note packs exactly
+        # `margin` px from its neighbors — matching sort_grid's tight
+        # shelf-packing instead of landing up to a whole grid_spacing
+        # further away than necessary.
+        candidate_xs = sorted({margin} | {rect[2] + margin for rect in occupied})
+        candidate_ys = sorted({margin} | {rect[3] + margin for rect in occupied})
+
+        for y in candidate_ys:
+            for x in candidate_xs:
+                if x > max_x:
+                    continue
                 # Pad the check by margin so the found spot keeps at least
                 # a margin's gap from neighbors, not just zero overlap
                 # (rect overlap is a strict inequality, so touching edges
@@ -366,8 +368,6 @@ class BoardWindow(Adw.ApplicationWindow):
                 padded = (x - margin, y - margin, x + width + margin, y + height + margin)
                 if not any(self._rects_overlap(padded, rect) for rect in occupied):
                     return (x, y)
-                x += step
-            y += step
 
         return self._next_position()
 
