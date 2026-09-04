@@ -696,6 +696,13 @@ class BoardWindow(Adw.ApplicationWindow):
         geo = monitor.get_geometry()
         return geo.width, geo.height
 
+    def _clamp_to_usable_space(self, width, height):
+        """Shrink either dimension so the window fits the current screen's
+        usable area (there's no per-monitor work-area API in GTK4, so the
+        full monitor geometry stands in for it)."""
+        screen_w, screen_h = self._current_monitor_size()
+        return min(width, screen_w), min(height, screen_h)
+
     def _exit_note_fullscreen(self):
         note = self._fullscreen_note
         if note is None:
@@ -847,6 +854,8 @@ class BoardWindow(Adw.ApplicationWindow):
                 "focused_index": focused_index,
                 "scroll_x": self.scroller.get_hadjustment().get_value(),
                 "scroll_y": self.scroller.get_vadjustment().get_value(),
+                "window_w": self.get_width(),
+                "window_h": self.get_height(),
             },
             indent=2,
         )
@@ -893,6 +902,12 @@ class BoardWindow(Adw.ApplicationWindow):
             )
         self._purge_expired_closed()
         self._refresh_closed_menu()
+
+        window_w = data.get("window_w")
+        window_h = data.get("window_h")
+        if window_w and window_h:
+            width, height = self._clamp_to_usable_space(window_w, window_h)
+            self.set_default_size(width, height)
 
         self._pending_scroll = (data.get("scroll_x", 0), data.get("scroll_y", 0))
         focused_index = data.get("focused_index")
