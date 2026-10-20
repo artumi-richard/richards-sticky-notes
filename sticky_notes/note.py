@@ -28,6 +28,7 @@ COLORS = {
 NOTE_WIDTH = 200
 NOTE_HEIGHT = 200
 MIN_NOTE_WIDTH = 120
+TAB_WIDTH_SPACES = 2
 MIN_NOTE_HEIGHT = 100
 UNDO_DEBOUNCE_MS = 600
 UNDO_STACK_LIMIT = 20
@@ -232,6 +233,17 @@ class NoteWidget(Gtk.Overlay):
         self.text_view.remove_css_class(f"note-font-{FONT_STYLE_MONOSPACE}")
         self.text_view.add_css_class(f"note-font-{style}")
         self.font_style = style
+        # Defer until the new CSS font has been applied to the text view.
+        GLib.idle_add(self.update_tab_width)
+
+    def update_tab_width(self):
+        """Size tab stops to TAB_WIDTH_SPACES spaces in the current font."""
+        layout = self.text_view.create_pango_layout(" " * TAB_WIDTH_SPACES)
+        width, _height = layout.get_pixel_size()
+        tabs = Pango.TabArray.new(1, True)
+        tabs.set_tab(0, Pango.TabAlign.LEFT, max(width, 1))
+        self.text_view.set_tabs(tabs)
+        return GLib.SOURCE_REMOVE
 
     def _on_toggle_font_clicked(self, _button):
         new_style = (

@@ -159,6 +159,11 @@ class BoardWindow(Adw.ApplicationWindow):
         self.request_save()
         return note
 
+    def update_tab_widths(self):
+        # Font changes alter the pixel width of a tab stop.
+        for note in self._positions:
+            GLib.idle_add(note.update_tab_width)
+
     def close_note(self, note):
         if note is self._fullscreen_note:
             for other in self._positions:

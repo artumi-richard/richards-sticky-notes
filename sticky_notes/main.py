@@ -106,6 +106,8 @@ class StickyNotesApplication(Adw.Application):
 
     def reload_css(self):
         self.css_provider.load_from_string(build_css(self.prefs))
+        if self.board is not None:
+            self.board.update_tab_widths()
 
     def do_activate(self):
         if self.board is None:
