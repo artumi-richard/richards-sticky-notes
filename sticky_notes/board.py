@@ -159,6 +159,11 @@ class BoardWindow(Adw.ApplicationWindow):
         self.request_save()
         return note
 
+    def refresh_note_colors(self):
+        # Palette edits change backgrounds without re-applying each note's colour.
+        for note in self._positions:
+            note.refresh_link_color()
+
     def update_tab_widths(self):
         # Font changes alter the pixel width of a tab stop.
         for note in self._positions:

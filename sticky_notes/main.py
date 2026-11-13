@@ -8,14 +8,11 @@ from gi.repository import Adw, Gdk, Gio, Gtk, Pango
 
 from . import APP_ID
 from .board import BoardWindow
+from .colors import build_background_css, build_palette_css
 from .note import NOTE_CSS
 from .prefs import Preferences
 
 BOARD_CSS = """
-.board-background {
-    background: linear-gradient(135deg, #2e3440 0%, #4c566a 50%, #5e81ac 100%);
-}
-
 .note-card {
     border-radius: 6px;
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
@@ -27,6 +24,10 @@ BOARD_CSS = """
 
 .closed-swatch {
     border-radius: 3px;
+}
+
+.swatch-strip {
+    border-radius: 4px;
 }
 
 .note-resize-grip {
@@ -71,7 +72,13 @@ def build_css(prefs):
     font_css = _font_css_rule(
         "note-font-proportional", prefs.proportional_font
     ) + "\n" + _font_css_rule("note-font-monospace", prefs.monospace_font)
-    return NOTE_CSS + BOARD_CSS + font_css
+    return (
+        build_palette_css(prefs.palette)
+        + build_background_css(prefs.board_background)
+        + NOTE_CSS
+        + BOARD_CSS
+        + font_css
+    )
 
 
 class StickyNotesApplication(Adw.Application):
@@ -108,6 +115,7 @@ class StickyNotesApplication(Adw.Application):
         self.css_provider.load_from_string(build_css(self.prefs))
         if self.board is not None:
             self.board.update_tab_widths()
+            self.board.refresh_note_colors()
 
     def do_activate(self):
         if self.board is None:

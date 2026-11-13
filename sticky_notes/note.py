@@ -10,22 +10,10 @@ gi.require_version("Gdk", "4.0")
 from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk, Pango
 
 from . import image_tools
+from .colors import DEFAULT_LINK, link_color_for, slot_color
 
 URL_RE = re.compile(r"https?://[^\s]+")
 PATH_RE = re.compile(r"(?:~|/)[^\s]+")
-
-COLORS = {
-    "yellow": "#f9e2af",
-    "pink": "#f5c2e7",
-    "green": "#a6e3a1",
-    "blue": "#89b4fa",
-    "orange": "#fab387",
-    "purple": "#cba6f7",
-    "red": "#f38ba8",
-    "teal": "#94e2d5",
-    "gray": "#bac2de",
-    "lavender": "#b4befe",
-}
 
 NOTE_WIDTH = 200
 NOTE_HEIGHT = 200
@@ -38,10 +26,7 @@ UNDO_STACK_LIMIT = 20
 FONT_STYLE_PROPORTIONAL = "proportional"
 FONT_STYLE_MONOSPACE = "monospace"
 
-NOTE_CSS = "\n".join(
-    f".note-color-{name} {{ background-color: {hex_color}; }}"
-    for name, hex_color in COLORS.items()
-) + "\n.image-viewer { background-color: black; }"
+NOTE_CSS = ".image-viewer { background-color: black; }\n"
 
 
 class NoteWidget(Gtk.Overlay):
@@ -131,7 +116,7 @@ class NoteWidget(Gtk.Overlay):
         self.text_view.add_css_class("note-text")
 
         self.link_tag = self.text_view.get_buffer().create_tag(
-            "link", foreground="#1e66f5", underline=Pango.Underline.SINGLE
+            "link", foreground=DEFAULT_LINK, underline=Pango.Underline.SINGLE
         )
 
         click = Gtk.GestureClick()
@@ -190,21 +175,36 @@ class NoteWidget(Gtk.Overlay):
         menu_button.set_tooltip_text("Note Color")
 
         popover = Gtk.Popover()
-        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        for margin in ("top", "bottom", "start", "end"):
-            getattr(box, f"set_margin_{margin}")(6)
+        menu_button.set_popover(popover)
+        # Rebuilt on every open so palette edits in Preferences show up.
+        popover.connect("show", self._populate_color_popover)
+        return menu_button
 
-        for name, hex_color in COLORS.items():
+    def _populate_color_popover(self, popover):
+        palette = self.board.prefs.palette
+        flow = Gtk.FlowBox()
+        flow.set_selection_mode(Gtk.SelectionMode.NONE)
+        flow.set_homogeneous(True)
+        flow.set_max_children_per_line(min(10, max(1, len(palette))))
+        flow.set_min_children_per_line(min(5, max(1, len(palette))))
+        flow.set_column_spacing(6)
+        flow.set_row_spacing(6)
+        for margin in ("top", "bottom", "start", "end"):
+            getattr(flow, f"set_margin_{margin}")(6)
+
+        for slot in palette:
             swatch = Gtk.Button()
             swatch.add_css_class("circular")
-            swatch.add_css_class(f"note-color-{name}")
+            swatch.add_css_class(f"note-color-{slot['id']}")
             swatch.set_size_request(24, 24)
-            swatch.connect("clicked", self._on_color_selected, name, popover)
-            box.append(swatch)
+            swatch.set_tooltip_text(slot["name"])
+            if slot["id"] == self.color_name:
+                swatch.set_icon_name("object-select-symbolic")
+            swatch.connect("clicked", self._on_color_selected, slot["id"], popover)
+            child = Gtk.FlowBoxChild(child=swatch, focusable=False)
+            flow.append(child)
 
-        popover.set_child(box)
-        menu_button.set_popover(popover)
-        return menu_button
+        popover.set_child(flow)
 
     def _on_color_selected(self, _button, name, popover):
         self._apply_color(name)
@@ -217,6 +217,12 @@ class NoteWidget(Gtk.Overlay):
                 self.remove_css_class(cls)
         self.add_css_class(f"note-color-{name}")
         self.color_name = name
+        self.refresh_link_color()
+
+    def refresh_link_color(self):
+        """Pick a link colour readable on this note's current background."""
+        background = slot_color(self.board.prefs.palette, self.color_name)
+        self.link_tag.set_property("foreground", link_color_for(background))
 
     def _on_close_clicked(self, _button):
         self.board.close_note(self)

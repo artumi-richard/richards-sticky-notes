@@ -50,6 +50,28 @@ external monitor, or you've resized the window entirely.
   colors" for new notes), initial placement (cascade or next free
   space), overlap prevention, note fullscreen behavior, on-close
   behavior, and separate proportional/monospace fonts.
+- **Configurable note colors**: the Colors page in Preferences lets you
+  add, remove, rename, reorder and recolor the note palette (as many
+  colors as you like). Text switches between dark and light automatically
+  for contrast, and link color is picked per note so links stay readable
+  on dark or saturated backgrounds. Load one of the built-in color schemes (Pastel, Classic
+  Sticky, Soft Rainbow, Nord, Solarized, Gruvbox, Dracula, Tokyo Night,
+  Earth Tones, Ocean, Autumn, Neon, Monochrome) to replace the palette in
+  place, so existing notes follow their slot into the new scheme, or append
+  it to your current colors.
+- **Board background**: each scheme comes with a matching board background
+  that is applied when you replace with it. You can also set it yourself
+  on the Colors page, as a solid color or a three-color diagonal gradient.
+- **Custom schemes**: add your own as JSON files in
+  `~/.config/sticky-notes/schemes/` (`background` is optional, 1–3 colors):
+
+  ```json
+  {
+    "name": "My Scheme",
+    "colors": [{"name": "Sun", "color": "#ffe08a"}, {"name": "Sea", "color": "#8ad4ff"}],
+    "background": ["#1b2a3a", "#2c4a63"]
+  }
+  ```
 - **Persistence**: notes (text, color, font, position, size) and
   preferences are saved automatically and restored on next launch.
 - **Keyboard shortcuts** — see below, or open them in-app via the
