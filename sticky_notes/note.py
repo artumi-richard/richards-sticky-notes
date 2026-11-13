@@ -144,7 +144,8 @@ class NoteWidget(Gtk.Overlay):
         self._redo_stack = []
         self._pending_snapshot = None
         self._undo_debounce_id = None
-        self._last_committed_text = text
+        # Undo/redo snapshots are content runs (text + images), not plain text.
+        self._last_committed = [{"type": "text", "value": text}] if text else []
         self._restoring = False
         self.text_view.get_buffer().connect("changed", self._on_text_changed)
 
@@ -273,7 +274,7 @@ class NoteWidget(Gtk.Overlay):
         self._redo_stack.clear()
         self.redo_button.set_sensitive(False)
         if self._pending_snapshot is None:
-            self._pending_snapshot = self._last_committed_text
+            self._pending_snapshot = self._last_committed
         if self._undo_debounce_id is not None:
             GLib.source_remove(self._undo_debounce_id)
         self._undo_debounce_id = GLib.timeout_add(UNDO_DEBOUNCE_MS, self._commit_snapshot)
@@ -285,45 +286,37 @@ class NoteWidget(Gtk.Overlay):
             del self._undo_stack[:-UNDO_STACK_LIMIT]
             self._pending_snapshot = None
             self.undo_button.set_sensitive(True)
-        self._last_committed_text = self.get_text()
+        self._last_committed = self.get_content_runs()
         self._undo_debounce_id = None
         self._relink()
         return False
 
     def _on_undo_clicked(self, _button):
         if self._undo_debounce_id is not None:
+            # Flush the in-flight edit so it is the one being undone.
             GLib.source_remove(self._undo_debounce_id)
-            self._undo_debounce_id = None
-            self._pending_snapshot = None
+            self._commit_snapshot()
         if not self._undo_stack:
             return
-        current_text = self.get_text()
-        previous_text = self._undo_stack.pop()
-        self._redo_stack.append(current_text)
+        current = self.get_content_runs()
+        previous = self._undo_stack.pop()
+        self._redo_stack.append(current)
         del self._redo_stack[:-UNDO_STACK_LIMIT]
-        self._restoring = True
-        self.text_view.get_buffer().set_text(previous_text)
-        self._restoring = False
-        self._last_committed_text = previous_text
+        self.set_content_runs(previous)
         self.undo_button.set_sensitive(bool(self._undo_stack))
         self.redo_button.set_sensitive(True)
-        self._relink()
         self.board.request_save()
 
     def _on_redo_clicked(self, _button):
         if not self._redo_stack:
             return
-        current_text = self.get_text()
-        next_text = self._redo_stack.pop()
-        self._undo_stack.append(current_text)
+        current = self.get_content_runs()
+        following = self._redo_stack.pop()
+        self._undo_stack.append(current)
         del self._undo_stack[:-UNDO_STACK_LIMIT]
-        self._restoring = True
-        self.text_view.get_buffer().set_text(next_text)
-        self._restoring = False
-        self._last_committed_text = next_text
+        self.set_content_runs(following)
         self.redo_button.set_sensitive(bool(self._redo_stack))
         self.undo_button.set_sensitive(True)
-        self._relink()
         self.board.request_save()
 
     def _relink(self):
@@ -442,16 +435,21 @@ class NoteWidget(Gtk.Overlay):
         aspect = texture.get_intrinsic_height() / max(texture.get_intrinsic_width(), 1)
         picture.set_size_request(max_width, int(max_width * aspect))
         picture.set_cursor(Gdk.Cursor.new_from_name("pointer"))
-        click = Gtk.GestureClick()
-        click.connect("released", self._on_image_clicked, picture, texture)
-        picture.add_controller(click)
 
         buf = self.text_view.get_buffer()
         anchor = buf.create_child_anchor(it)
         anchor.image_bytes = image_bytes
+
+        # Any button (left or right) opens the image menu. Act on press and
+        # claim it so the text view's own right-click menu doesn't also open.
+        click = Gtk.GestureClick()
+        click.set_button(0)
+        click.connect("pressed", self._on_image_clicked, picture, texture, anchor)
+        picture.add_controller(click)
+
         self.text_view.add_child_at_anchor(picture, anchor)
 
-    def _on_image_clicked(self, gesture, _n_press, x, y, picture, texture):
+    def _on_image_clicked(self, gesture, _n_press, x, y, picture, texture, anchor):
         gesture.set_state(Gtk.EventSequenceState.CLAIMED)
 
         popover = Gtk.Popover()
@@ -461,15 +459,17 @@ class NoteWidget(Gtk.Overlay):
         popover.set_pointing_to(rect)
 
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
-        for label, icon, handler in (
-            ("View Full Screen", "view-fullscreen-symbolic", self._show_image_fullscreen),
-            ("Copy Image", "edit-copy-symbolic", self._copy_image),
+        for label, icon, action in (
+            ("View Full Screen", "view-fullscreen-symbolic",
+             lambda: self._show_image_fullscreen(texture)),
+            ("Copy Image", "edit-copy-symbolic", lambda: self._copy_image(texture)),
+            ("Delete Image", "user-trash-symbolic", lambda: self._delete_image(anchor)),
         ):
             content = Adw.ButtonContent(label=label, icon_name=icon)
             content.set_halign(Gtk.Align.START)
             button = Gtk.Button(child=content)
             button.add_css_class("flat")
-            button.connect("clicked", self._on_image_action, popover, handler, texture)
+            button.connect("clicked", self._on_image_action, popover, action)
             box.append(button)
         popover.set_child(box)
 
@@ -477,9 +477,21 @@ class NoteWidget(Gtk.Overlay):
         popover.connect("closed", lambda p: GLib.idle_add(p.unparent))
         popover.popup()
 
-    def _on_image_action(self, _button, popover, handler, texture):
+    def _on_image_action(self, _button, popover, action):
         popover.popdown()
-        handler(texture)
+        # Defer so the popover (parented to the picture) is closed before the
+        # action runs; deleting the image destroys the picture.
+        GLib.idle_add(lambda: action() and False)
+
+    def _delete_image(self, anchor):
+        if anchor.get_deleted():
+            return
+        buf = self.text_view.get_buffer()
+        start = buf.get_iter_at_child_anchor(anchor)
+        end = start.copy()
+        end.forward_char()
+        buf.delete(start, end)
+        self.board.request_save()
 
     def _copy_image(self, texture):
         # Declare the value as Gdk.Texture (not the concrete subclass, e.g.
@@ -563,5 +575,5 @@ class NoteWidget(Gtk.Overlay):
                     continue
                 self._insert_image_at_iter(buf.get_end_iter(), texture, image_bytes)
         self._restoring = False
-        self._last_committed_text = self.get_text()
+        self._last_committed = self.get_content_runs()
         self._relink()
