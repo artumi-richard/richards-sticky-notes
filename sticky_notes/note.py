@@ -7,7 +7,7 @@ import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 gi.require_version("Gdk", "4.0")
-from gi.repository import Gdk, Gio, GLib, Gtk, Pango
+from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk, Pango
 
 URL_RE = re.compile(r"https?://[^\s]+")
 PATH_RE = re.compile(r"(?:~|/)[^\s]+")
@@ -39,7 +39,7 @@ FONT_STYLE_MONOSPACE = "monospace"
 NOTE_CSS = "\n".join(
     f".note-color-{name} {{ background-color: {hex_color}; }}"
     for name, hex_color in COLORS.items()
-)
+) + "\n.image-viewer { background-color: black; }"
 
 
 class NoteWidget(Gtk.Overlay):
@@ -441,11 +441,83 @@ class NoteWidget(Gtk.Overlay):
         max_width = max(available_w - 24, 80)
         aspect = texture.get_intrinsic_height() / max(texture.get_intrinsic_width(), 1)
         picture.set_size_request(max_width, int(max_width * aspect))
+        picture.set_cursor(Gdk.Cursor.new_from_name("pointer"))
+        click = Gtk.GestureClick()
+        click.connect("released", self._on_image_clicked, picture, texture)
+        picture.add_controller(click)
 
         buf = self.text_view.get_buffer()
         anchor = buf.create_child_anchor(it)
         anchor.image_bytes = image_bytes
         self.text_view.add_child_at_anchor(picture, anchor)
+
+    def _on_image_clicked(self, gesture, _n_press, x, y, picture, texture):
+        gesture.set_state(Gtk.EventSequenceState.CLAIMED)
+
+        popover = Gtk.Popover()
+        popover.set_has_arrow(True)
+        rect = Gdk.Rectangle()
+        rect.x, rect.y, rect.width, rect.height = int(x), int(y), 1, 1
+        popover.set_pointing_to(rect)
+
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        for label, icon, handler in (
+            ("View Full Screen", "view-fullscreen-symbolic", self._show_image_fullscreen),
+            ("Copy Image", "edit-copy-symbolic", self._copy_image),
+        ):
+            content = Adw.ButtonContent(label=label, icon_name=icon)
+            content.set_halign(Gtk.Align.START)
+            button = Gtk.Button(child=content)
+            button.add_css_class("flat")
+            button.connect("clicked", self._on_image_action, popover, handler, texture)
+            box.append(button)
+        popover.set_child(box)
+
+        popover.set_parent(picture)
+        popover.connect("closed", lambda p: GLib.idle_add(p.unparent))
+        popover.popup()
+
+    def _on_image_action(self, _button, popover, handler, texture):
+        popover.popdown()
+        handler(texture)
+
+    def _copy_image(self, texture):
+        # Declare the value as Gdk.Texture (not the concrete subclass, e.g.
+        # GdkMemoryTexture) so paste's contain_gtype(Gdk.Texture) matches.
+        value = GObject.Value(Gdk.Texture, texture)
+        provider = Gdk.ContentProvider.new_for_value(value)
+        self.get_display().get_clipboard().set_content(provider)
+
+    def _show_image_fullscreen(self, texture):
+        window = Gtk.Window()
+        window.set_title("Image")
+        window.add_css_class("image-viewer")
+        root = self.get_root()
+        if isinstance(root, Gtk.Window):
+            window.set_transient_for(root)
+            window.set_modal(True)
+
+        picture = Gtk.Picture.new_for_paintable(texture)
+        picture.set_can_shrink(True)
+        picture.set_content_fit(Gtk.ContentFit.SCALE_DOWN)
+        window.set_child(picture)
+
+        def on_key(_ctrl, keyval, _keycode, _state):
+            if keyval == Gdk.KEY_Escape:
+                window.close()
+                return True
+            return False
+
+        keys = Gtk.EventControllerKey()
+        keys.connect("key-pressed", on_key)
+        window.add_controller(keys)
+
+        click = Gtk.GestureClick()
+        click.connect("released", lambda *_: window.close())
+        window.add_controller(click)
+
+        window.fullscreen()
+        window.present()
 
     def get_content_runs(self):
         """Serialize text + embedded images, in order, for persistence."""
