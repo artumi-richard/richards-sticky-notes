@@ -38,7 +38,9 @@ external monitor, or you've resized the window entirely.
   to bring back a deleted note — restoring dodges any overlap automatically.
 - **Clickable links**: URLs and existing file paths typed into a note
   become clickable (a file path is only linkified if it actually exists).
-- **Paste images** (Ctrl+V) directly into a note.
+- **Paste images** (Ctrl+V) directly into a note. Click an image for a menu
+  to view it full screen, copy, save, resize before copying/saving, open it
+  in GIMP (if installed), or delete it.
 - **Per-note controls**: color, proportional/monospace font toggle, copy
   text to clipboard, fullscreen (fill the window or the whole screen).
 - **Arrange tools**: tidy all notes into a cascade or a grid with one
@@ -116,6 +118,7 @@ sticky_notes/
                            persistence, arrange/fullscreen/shortcuts logic
   note.py                 a single note card: text, undo/redo, links,
                            image paste, font/color/fullscreen controls
+  image_tools.py          image resize dialog, save-to-file, open in GIMP
   prefs.py                Preferences model + JSON load/save
   prefs_ui.py              preferences window UI
 ```

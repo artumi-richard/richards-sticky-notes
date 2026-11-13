@@ -9,6 +9,8 @@ gi.require_version("Adw", "1")
 gi.require_version("Gdk", "4.0")
 from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk, Pango
 
+from . import image_tools
+
 URL_RE = re.compile(r"https?://[^\s]+")
 PATH_RE = re.compile(r"(?:~|/)[^\s]+")
 
@@ -458,14 +460,37 @@ class NoteWidget(Gtk.Overlay):
         rect.x, rect.y, rect.width, rect.height = int(x), int(y), 1, 1
         popover.set_pointing_to(rect)
 
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
-        for label, icon, action in (
+        root = self.get_root()
+        items = [
             ("View Full Screen", "view-fullscreen-symbolic",
              lambda: self._show_image_fullscreen(texture)),
+            None,
             ("Copy Image", "edit-copy-symbolic", lambda: self._copy_image(texture)),
+            ("Resize & Copy…", "edit-copy-symbolic",
+             lambda: image_tools.show_resize_dialog(root, texture, "Copy", self._copy_image)),
+            None,
+            ("Save Image…", "document-save-symbolic",
+             lambda: image_tools.save_texture(root, texture, self._show_image_error)),
+            ("Resize & Save…", "document-save-as-symbolic",
+             lambda: image_tools.show_resize_dialog(
+                 root, texture, "Save…",
+                 lambda t: image_tools.save_texture(root, t, self._show_image_error))),
+        ]
+        if image_tools.find_gimp():
+            items.append(("Open in GIMP", "applications-graphics-symbolic",
+                          lambda: self._open_in_gimp(texture)))
+        items += [
+            None,
             ("Delete Image", "user-trash-symbolic", lambda: self._delete_image(anchor)),
-        ):
-            content = Adw.ButtonContent(label=label, icon_name=icon)
+        ]
+
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        for item in items:
+            if item is None:
+                box.append(Gtk.Separator())
+                continue
+            label, icon, action = item
+            content = Adw.ButtonContent(label=label, icon_name=icon, use_underline=False)
             content.set_halign(Gtk.Align.START)
             button = Gtk.Button(child=content)
             button.add_css_class("flat")
@@ -482,6 +507,16 @@ class NoteWidget(Gtk.Overlay):
         # Defer so the popover (parented to the picture) is closed before the
         # action runs; deleting the image destroys the picture.
         GLib.idle_add(lambda: action() and False)
+
+    def _open_in_gimp(self, texture):
+        error = image_tools.open_in_gimp(texture)
+        if error:
+            self._show_image_error(error)
+
+    def _show_image_error(self, message):
+        dialog = Adw.AlertDialog(heading="Image Error", body=message)
+        dialog.add_response("ok", "OK")
+        dialog.present(self.get_root())
 
     def _delete_image(self, anchor):
         if anchor.get_deleted():
