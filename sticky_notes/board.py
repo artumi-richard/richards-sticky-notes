@@ -10,6 +10,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gio, GLib, Gtk
 
+from .christmas import SnowLayer
 from .note import MIN_NOTE_HEIGHT, MIN_NOTE_WIDTH, NOTE_HEIGHT, NoteWidget
 from .prefs import (
     FULLSCREEN_MODE_SCREEN,
@@ -112,7 +113,6 @@ class BoardWindow(Adw.ApplicationWindow):
         toolbar_view.add_top_bar(header)
 
         self.fixed = Gtk.Fixed()
-        self.fixed.add_css_class("board-background")
         self.fixed.set_hexpand(True)
         self.fixed.set_vexpand(True)
         self.fixed.set_size_request(900, 650)
@@ -128,8 +128,17 @@ class BoardWindow(Adw.ApplicationWindow):
         self.scroller.set_overlay_scrolling(False)
         self.scroller.set_child(self.fixed)
 
-        toolbar_view.set_content(self.scroller)
+        # Layers, back to front: board background, snow, scrolling notes.
+        # The background lives on the overlay so snow can fall behind the notes.
+        self.snow = SnowLayer()
+        board_layers = Gtk.Overlay()
+        board_layers.add_css_class("board-background")
+        board_layers.set_child(self.snow)
+        board_layers.add_overlay(self.scroller)
+
+        toolbar_view.set_content(board_layers)
         self.set_content(toolbar_view)
+        self.apply_christmas()
 
         self._refresh_closed_menu()
 
@@ -158,6 +167,12 @@ class BoardWindow(Adw.ApplicationWindow):
         self._recompute_canvas_size()
         self.request_save()
         return note
+
+    def apply_christmas(self):
+        prefs = self.prefs
+        self.snow.set_running(prefs.christmas_mode and prefs.xmas_snow)
+        for note in self._positions:
+            note.apply_christmas()
 
     def refresh_note_colors(self):
         # Palette edits change backgrounds without re-applying each note's colour.

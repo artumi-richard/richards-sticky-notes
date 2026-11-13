@@ -62,6 +62,13 @@ external monitor, or you've resized the window entirely.
 - **Board background**: each scheme comes with a matching board background
   that is applied when you replace with it. You can also set it yourself
   on the Colors page, as a solid color or a three-color diagonal gradient.
+- **Christmas mode** (Preferences → Festive): snow drifting down the board
+  behind your notes, a candy-cane striped band and candy cane on each note,
+  a sprig of holly, and note titles (first line) in bold red. Each can be
+  switched on or off. Snow is kept light on CPU: ~24 fps while the window
+  is focused, ~8 fps when it isn't, paused while minimised, and still if
+  animations are disabled system-wide. Pair it with the Christmas color
+  scheme.
 - **Custom schemes**: add your own as JSON files in
   `~/.config/sticky-notes/schemes/` (`background` is optional, 1–3 colors):
 

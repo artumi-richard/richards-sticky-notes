@@ -10,7 +10,8 @@ gi.require_version("Gdk", "4.0")
 from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk, Pango
 
 from . import image_tools
-from .colors import DEFAULT_LINK, link_color_for, slot_color
+from .christmas import CandyCane, HollySprig
+from .colors import DEFAULT_LINK, link_color_for, slot_color, title_color_for
 
 URL_RE = re.compile(r"https?://[^\s]+")
 PATH_RE = re.compile(r"(?:~|/)[^\s]+")
@@ -56,6 +57,16 @@ class NoteWidget(Gtk.Overlay):
         self.handle = handle
 
         handle.set_start_widget(self._build_color_menu())
+
+        # Christmas ornaments sit in the otherwise empty middle of the handle.
+        # They ignore input, so dragging by the handle still works over them.
+        self.xmas_ornament = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=2)
+        self.xmas_ornament.set_can_target(False)
+        self.xmas_candy_cane = CandyCane()
+        self.xmas_holly = HollySprig()
+        self.xmas_ornament.append(self.xmas_candy_cane)
+        self.xmas_ornament.append(self.xmas_holly)
+        handle.set_center_widget(self.xmas_ornament)
 
         end_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
 
@@ -106,6 +117,12 @@ class NoteWidget(Gtk.Overlay):
         handle.set_end_widget(end_box)
         root.append(handle)
 
+        self.xmas_stripe = Gtk.Box()
+        self.xmas_stripe.add_css_class("xmas-candy-stripe")
+        self.xmas_stripe.set_size_request(-1, 6)
+        self.xmas_stripe.set_can_target(False)
+        root.append(self.xmas_stripe)
+
         self.text_view = Gtk.TextView()
         self.text_view.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
         self.text_view.set_top_margin(8)
@@ -115,6 +132,11 @@ class NoteWidget(Gtk.Overlay):
         self.text_view.get_buffer().set_text(text)
         self.text_view.add_css_class("note-text")
 
+        # Created before the link tag so a link in the title keeps its link colour
+        # (later tags take priority).
+        self.title_tag = self.text_view.get_buffer().create_tag(
+            "xmas-title", weight=Pango.Weight.BOLD
+        )
         self.link_tag = self.text_view.get_buffer().create_tag(
             "link", foreground=DEFAULT_LINK, underline=Pango.Underline.SINGLE
         )
@@ -166,6 +188,7 @@ class NoteWidget(Gtk.Overlay):
 
         self._apply_color(color_name)
         self._apply_font_style(font_style or board.prefs.default_font_style)
+        self.apply_christmas()
         self._relink()
 
     def _build_color_menu(self):
@@ -219,10 +242,34 @@ class NoteWidget(Gtk.Overlay):
         self.color_name = name
         self.refresh_link_color()
 
+    def apply_christmas(self):
+        prefs = self.board.prefs
+        on = prefs.christmas_mode
+        candy = on and prefs.xmas_candy_cane
+        holly = on and prefs.xmas_holly
+        self.xmas_candy_cane.set_visible(candy)
+        self.xmas_holly.set_visible(holly)
+        self.xmas_ornament.set_visible(candy or holly)
+        self.xmas_stripe.set_visible(candy)
+        self._retitle()
+
+    def _retitle(self):
+        """In Christmas mode, show the note's first line as a red title."""
+        buf = self.text_view.get_buffer()
+        start, end = buf.get_bounds()
+        buf.remove_tag(self.title_tag, start, end)
+        prefs = self.board.prefs
+        if prefs.christmas_mode and prefs.xmas_red_titles:
+            line_end = buf.get_start_iter()
+            if not line_end.ends_line():
+                line_end.forward_to_line_end()
+            buf.apply_tag(self.title_tag, start, line_end)
+
     def refresh_link_color(self):
-        """Pick a link colour readable on this note's current background."""
+        """Pick link and title colours readable on this note's current background."""
         background = slot_color(self.board.prefs.palette, self.color_name)
         self.link_tag.set_property("foreground", link_color_for(background))
+        self.title_tag.set_property("foreground", title_color_for(background))
 
     def _on_close_clicked(self, _button):
         self.board.close_note(self)
@@ -348,6 +395,8 @@ class NoteWidget(Gtk.Overlay):
             expanded = os.path.expanduser(candidate)
             if os.path.isabs(expanded) and os.path.exists(expanded):
                 self._tag_range(buf, match.start(), match.start() + len(candidate))
+
+        self._retitle()
 
     @staticmethod
     def _tag_range(buf, char_start, char_end):

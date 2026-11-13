@@ -8,6 +8,7 @@ from gi.repository import Adw, Gdk, Gio, Gtk, Pango
 
 from . import APP_ID
 from .board import BoardWindow
+from .christmas import CANDY_STRIPE_CSS
 from .colors import build_background_css, build_palette_css
 from .note import NOTE_CSS
 from .prefs import Preferences
@@ -77,6 +78,7 @@ def build_css(prefs):
         + build_background_css(prefs.board_background)
         + NOTE_CSS
         + BOARD_CSS
+        + CANDY_STRIPE_CSS
         + font_css
     )
 

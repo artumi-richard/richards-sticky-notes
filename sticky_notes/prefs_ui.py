@@ -232,6 +232,38 @@ def build_preferences_window(prefs, app, board):
     )
     font_group.add(font_style_row)
 
+    festive_group = Adw.PreferencesGroup()
+    festive_group.set_title("Festive")
+    page.add(festive_group)
+
+    xmas_row = Adw.ExpanderRow(
+        title="Christmas Mode", subtitle="Snow on the board; holly, candy canes and red titles on notes"
+    )
+    xmas_row.set_show_enable_switch(True)
+    xmas_row.set_enable_expansion(prefs.christmas_mode)
+    xmas_row.set_expanded(prefs.christmas_mode)
+
+    def set_xmas(attr, value):
+        set_and_save(attr, value)
+        board.apply_christmas()
+
+    xmas_row.connect(
+        "notify::enable-expansion",
+        lambda row, _p: set_xmas("christmas_mode", row.get_enable_expansion()),
+    )
+    for attr, title, subtitle in (
+        ("xmas_snow", "Snow", "Snowflakes drift down behind the notes"),
+        ("xmas_candy_cane", "Candy Canes", "Striped band and a candy cane on each note"),
+        ("xmas_holly", "Holly", "A sprig of holly on each note"),
+        ("xmas_red_titles", "Red Titles", "Show each note's first line in bold red"),
+    ):
+        sub_row = Adw.SwitchRow(title=title, subtitle=subtitle, active=getattr(prefs, attr))
+        sub_row.connect(
+            "notify::active", lambda row, _p, a=attr: set_xmas(a, row.get_active())
+        )
+        xmas_row.add_row(sub_row)
+    festive_group.add(xmas_row)
+
     window.add(_build_colors_page(window, prefs, app, refresh_color_row))
 
     return window

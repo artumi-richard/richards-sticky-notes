@@ -173,6 +173,17 @@ BUILTIN_SCHEMES = [
         ("Hot Pink", "#ff1f6d"),
     ),
     _scheme(
+        "Christmas",
+        ("Snow", "#f8f8f2"),
+        ("Cranberry", "#c62828"),
+        ("Holly", "#2e7d32"),
+        ("Gold", "#f9d56e"),
+        ("Pine", "#a5d6a7"),
+        ("Candy", "#ffcdd2"),
+        ("Frost", "#e3f2fd"),
+        ("Gingerbread", "#c8a27c"),
+    ),
+    _scheme(
         "Monochrome",
         ("White", "#ffffff"),
         ("Mist", "#eeeeee"),
@@ -203,6 +214,7 @@ _SCHEME_BACKGROUNDS = {
     "Ocean": ["#f1e3c6", "#e6d3a8", "#d9c08c"],  # sandy beach
     "Autumn": ["#2d1e17", "#3d271b", "#4f3322"],
     "Neon": ["#0d0221", "#1a0b3d", "#2b0f54"],
+    "Christmas": ["#0b1d2e", "#12324a", "#1b4d3e"],  # winter night into pine
     "Monochrome": ["#4f6070", "#6b7f8f", "#8fa3b2"],
 }
 for _s in BUILTIN_SCHEMES:
@@ -364,6 +376,25 @@ def link_color_for(hex_color):
         if contrast_ratio(candidate, hex_color) >= MIN_LINK_CONTRAST:
             return candidate
     return max(LINK_CANDIDATES, key=lambda c: contrast_ratio(c, hex_color))
+
+
+# Christmas mode note titles: always a red, picked like link colours so a
+# title stays readable on red, green or dark notes.
+TITLE_CANDIDATES = [
+    "#c62828",  # festive red
+    "#8e0000",  # deep red, for mid-tone notes
+    "#ff8a80",  # light red, for dark notes
+    "#ffcdd2",  # pale pink-red, for red notes
+    "#5c0000",  # darkest red, for bright mid-tone notes
+    "#ffe4e6",  # palest red, for saturated red/green notes
+]
+
+
+def title_color_for(hex_color):
+    for candidate in TITLE_CANDIDATES:
+        if contrast_ratio(candidate, hex_color) >= MIN_LINK_CONTRAST:
+            return candidate
+    return max(TITLE_CANDIDATES, key=lambda c: contrast_ratio(c, hex_color))
 
 
 def slot_color(palette, slot_id):

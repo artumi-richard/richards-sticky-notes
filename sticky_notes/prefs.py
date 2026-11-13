@@ -38,6 +38,11 @@ class Preferences:
         self.on_close_action = ON_CLOSE_NONE
         self.grid_spacing = 20
         self.grid_margin = 5
+        self.christmas_mode = False
+        self.xmas_snow = True
+        self.xmas_candy_cane = True
+        self.xmas_holly = True
+        self.xmas_red_titles = True
         self._cycle_index = 0
         self.load()
 
@@ -67,6 +72,11 @@ class Preferences:
             "default_color": self.default_color,
             "palette": self.palette,
             "board_background": self.board_background,
+            "christmas_mode": self.christmas_mode,
+            "xmas_snow": self.xmas_snow,
+            "xmas_candy_cane": self.xmas_candy_cane,
+            "xmas_holly": self.xmas_holly,
+            "xmas_red_titles": self.xmas_red_titles,
             "placement_mode": self.placement_mode,
             "prevent_overlap": self.prevent_overlap,
             "proportional_font": self.proportional_font,
@@ -99,6 +109,14 @@ class Preferences:
         self.on_close_action = data.get("on_close_action", self.on_close_action)
         self.grid_spacing = data.get("grid_spacing", self.grid_spacing)
         self.grid_margin = data.get("grid_margin", self.grid_margin)
+        for attr in (
+            "christmas_mode",
+            "xmas_snow",
+            "xmas_candy_cane",
+            "xmas_holly",
+            "xmas_red_titles",
+        ):
+            setattr(self, attr, bool(data.get(attr, getattr(self, attr))))
 
     def save(self):
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
