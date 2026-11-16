@@ -145,6 +145,23 @@ class NoteWidget(Gtk.Overlay):
         click.connect("released", self._on_text_click)
         self.text_view.add_controller(click)
 
+        # Middle-click pastes the primary selection at the text cursor rather
+        # than at the pointer: claim the press in the capture phase so the
+        # TextView's own handler never moves the cursor.
+        middle_click = Gtk.GestureClick()
+        middle_click.set_button(Gdk.BUTTON_MIDDLE)
+        middle_click.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        middle_click.connect("pressed", self._on_middle_click)
+        self.text_view.add_controller(middle_click)
+
+        # Selecting text with the left mouse button also copies it to the
+        # clipboard. A legacy controller sees the raw release even when the
+        # TextView's drag-select gesture has claimed the sequence.
+        select_copy = Gtk.EventControllerLegacy()
+        select_copy.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        select_copy.connect("event", self._on_text_raw_event)
+        self.text_view.add_controller(select_copy)
+
         motion = Gtk.EventControllerMotion()
         motion.connect("motion", self._on_text_hover)
         self.text_view.add_controller(motion)
@@ -452,6 +469,39 @@ class NoteWidget(Gtk.Overlay):
         end_offset = buf.get_end_iter().get_offset()
         offset = max(0, min(offset, end_offset))
         buf.place_cursor(buf.get_iter_at_offset(offset))
+
+    def _on_text_raw_event(self, _controller, event):
+        if (
+            event.get_event_type() == Gdk.EventType.BUTTON_RELEASE
+            and event.get_button() == Gdk.BUTTON_PRIMARY
+        ):
+            # Defer until the TextView has finished updating the selection.
+            GLib.idle_add(self._copy_selection_to_clipboard)
+        return False
+
+    def _copy_selection_to_clipboard(self):
+        buf = self.text_view.get_buffer()
+        if buf.get_has_selection():
+            buf.copy_clipboard(self.get_display().get_clipboard())
+        return GLib.SOURCE_REMOVE
+
+    def _on_middle_click(self, gesture, _n_press, _x, _y):
+        gesture.set_state(Gtk.EventSequenceState.CLAIMED)
+        self.text_view.grab_focus()
+        self.get_display().get_primary_clipboard().read_text_async(
+            None, self._on_primary_text_ready
+        )
+
+    def _on_primary_text_ready(self, clipboard, result):
+        try:
+            text = clipboard.read_text_finish(result)
+        except Exception:
+            return
+        if not text:
+            return
+        buf = self.text_view.get_buffer()
+        buf.insert_interactive_at_cursor(text, -1, self.text_view.get_editable())
+        self.text_view.scroll_mark_onscreen(buf.get_insert())
 
     def _on_key_pressed(self, _controller, keyval, _keycode, state):
         is_paste = keyval in (Gdk.KEY_v, Gdk.KEY_V) and (
